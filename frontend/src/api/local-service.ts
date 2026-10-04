@@ -1,6 +1,14 @@
+import { toCsv } from '@/api/csv'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
-import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+import type {
+  ActionResult,
+  BatchReceipt,
+  EntryRow,
+  ModuleMeta,
+  OverviewResult,
+  PageResult,
+} from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -44,11 +52,13 @@ export function runAction(key: string, id: number, action: string): ActionResult
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
   const lastStatus = meta.statuses[meta.statuses.length - 1]
+  // 每次状态流转抬版本号：批次 CAS 能发现「别的缆道已改状态」而不是被覆盖回去
   const updated: EntryRow = {
     ...rows[index],
     status: target,
     pending: target !== lastStatus,
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
+    version: Number(rows[index].version ?? 1) + 1,
   }
   const next = [...rows]
   next[index] = updated
@@ -64,11 +74,38 @@ export function resetModule(key: string): PageResult {
 export function exportEntries(key: string): { filename: string; content: string } {
   const meta = moduleMeta(key)
   const header = ['编号', ...meta.fields, '当前状态']
-  const lines = [header.join(',')]
-  for (const row of listRows(key)) {
-    lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status].join(','))
+  const rows = listRows(key).map((row) => [
+    row.id,
+    ...meta.fields.map((field) => row[field] ?? ''),
+    row.status,
+  ])
+  return {
+    filename: `${meta.name}-清单.csv`,
+    content: toCsv(header, rows),
   }
-  return { filename: `${meta.name}-清单.csv`, content: `\uFEFF${lines.join('\n')}` }
+}
+
+/** 批次回执导出：逐次提交一条回执块，每项的成功/失败/原因都在。 */
+export function exportBatchReceipts(batchId: string, receipts: BatchReceipt[]): {
+  filename: string
+  content: string
+} {
+  const header = ['提交时间', '批次号', '缆道编号', '跨度米数', '荷载能力', '结果', '原因']
+  const rows: unknown[][] = []
+  for (const receipt of receipts) {
+    for (const item of receipt.items) {
+      rows.push([
+        receipt.at,
+        batchId,
+        item.code,
+        item.span,
+        item.load,
+        item.result,
+        item.reason,
+      ])
+    }
+  }
+  return { filename: `缆道批次回执-${batchId}.csv`, content: toCsv(header, rows) }
 }
 
 export function downloadEntries(key: string): void {

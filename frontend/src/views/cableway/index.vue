@@ -3,16 +3,16 @@
     <header class="page-head">
       <div>
         <h2>测流缆道管理</h2>
-        <p class="page-desc">维护测流缆道，围绕缆道编号、所属站点、跨度米数、建成日期做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护测流缆道，围绕缆道编号、所属站点、跨度米数、荷载能力做登记、批量保存与状态流转。</p>
       </div>
       <div class="page-actions">
-        <button class="btn primary" type="button" @click="openCreate">登记测流缆道</button>
+        <button class="btn primary" type="button" @click="openBatch">缆道参数批量保存</button>
         <button class="btn" type="button" @click="exportRows">导出测流缆道清单</button>
       </div>
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
+      <article v-for="item in stats" :key="item.label" class="stat-card" :class="{ 'stat-alert': item.hot }">
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
@@ -55,6 +55,14 @@
             >
               {{ action }}
             </button>
+            <button
+              class="link"
+              type="button"
+              :disabled="String(row.status) === '已停用'"
+              @click="addToBatch(row)"
+            >
+              加入批次
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -71,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   downloadEntries,
@@ -79,13 +87,16 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { useCablewayBatchStore } from '@/stores/cableway-batch'
+import { listRows } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('cableway')
 const columns = ["缆道编号", "所属站点", "跨度米数", "建成日期", "最近检修日", "荷载能力", "检修人员", "缆道状态"]
 const actions = ["安排检修", "完成检修", "停用缆道"]
 const statuses = ["正常运行", "需检修", "检修中", "已停用"]
-const stats = [{"label": "缆道总数", "value": 0}, {"label": "正常运行数", "value": 0}, {"label": "需检修数", "value": 0}]
+
+const batchStore = useCablewayBatchStore()
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -99,6 +110,16 @@ const statusSummary = computed(() =>
   })),
 )
 
+const stats = computed(() => {
+  const all = listRows(meta.key)
+  return [
+    { label: "缆道总数", value: all.length, hot: false },
+    { label: "正常运行数", value: all.filter((row) => String(row.status) === "正常运行").length, hot: false },
+    { label: "需检修数", value: all.filter((row) => String(row.status) === "需检修").length, hot: false },
+    { label: "缆道参数核查待办", value: batchStore.checkCount, hot: batchStore.checkCount > 0 },
+  ]
+})
+
 function resetFilters() {
   filters.value = {}
   reload()
@@ -108,8 +129,21 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
-function openCreate() {
-  errorMessage.value = '测流缆道登记入口尚未接入审批流'
+function openBatch() {
+  batchStore.openPanel()
+}
+
+function addToBatch(row: EntryRow) {
+  if (String(row.status) === '已停用') {
+    errorMessage.value = `缆道 ${row['缆道编号']} 已停用，不能入批`
+    return
+  }
+  const message = batchStore.addCablewayRow(row)
+  if (message) {
+    errorMessage.value = message
+    return
+  }
+  batchStore.openPanel()
 }
 
 function runAction(action: string, row: EntryRow) {
@@ -132,6 +166,9 @@ function reload() {
     errorMessage.value = error instanceof Error ? error.message : '测流缆道列表读取失败'
   }
 }
+
+// 其他入口/标签页落库后联动刷新本页（含状态、统计、核查待办）
+watch(() => batchStore.dataTick, reload)
 
 onMounted(reload)
 </script>

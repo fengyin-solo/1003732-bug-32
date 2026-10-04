@@ -3,16 +3,16 @@
     <header class="page-head">
       <div>
         <h2>巡检记录管理</h2>
-        <p class="page-desc">维护巡检记录，围绕记录编号、站点编号、巡检日期、巡检人员做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护巡检记录，缆道参数落库后自动挂上核查待办，各巡检入口待办数联动更新。</p>
       </div>
       <div class="page-actions">
-        <button class="btn primary" type="button" @click="openCreate">登记巡检记录</button>
+        <button class="btn primary" type="button" @click="openBatch">缆道参数批量保存</button>
         <button class="btn" type="button" @click="exportRows">导出巡检记录清单</button>
       </div>
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
+      <article v-for="item in stats" :key="item.label" class="stat-card" :class="{ 'stat-alert': item.hot }">
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
@@ -42,7 +42,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="String(row.id)">
+        <tr v-for="row in rows" :key="String(row.id)" :class="{ 'row-check': isCheckTodo(row) }">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
@@ -55,6 +55,7 @@
             >
               {{ action }}
             </button>
+            <span v-if="isCheckTodo(row)" class="check-tag">缆道参数核查</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -71,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   downloadEntries,
@@ -79,13 +80,16 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { useCablewayBatchStore } from '@/stores/cableway-batch'
+import { listRows } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('inspection')
 const columns = ["记录编号", "站点编号", "巡检日期", "巡检人员", "检查项目", "发现问题", "处理措施", "巡检状态"]
 const actions = ["完成巡检", "报告故障", "确认处置"]
 const statuses = ["待巡检", "已巡检", "发现故障", "已处置"]
-const stats = [{"label": "本月巡检次数", "value": 0}, {"label": "已巡检站点", "value": 0}, {"label": "待处置故障", "value": 0}]
+
+const batchStore = useCablewayBatchStore()
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -99,6 +103,39 @@ const statusSummary = computed(() =>
   })),
 )
 
+function isCheckTodo(row: EntryRow): boolean {
+  return (
+    ['待巡检', '发现故障'].includes(String(row.status)) &&
+    String(row['检查项目'] ?? '').includes('缆道参数核查')
+  )
+}
+
+const stats = computed(() => {
+  const all = listRows(meta.key)
+  return [
+    {
+      label: "本月巡检次数",
+      value: all.length,
+      hot: false,
+    },
+    {
+      label: "已巡检站点",
+      value: all.filter((row) => String(row.status) === '已巡检').length,
+      hot: false,
+    },
+    {
+      label: "待处置故障",
+      value: all.filter((row) => String(row.status) === '发现故障').length,
+      hot: all.some((row) => String(row.status) === '发现故障'),
+    },
+    {
+      label: "缆道参数核查待办",
+      value: batchStore.checkCount,
+      hot: batchStore.checkCount > 0,
+    },
+  ]
+})
+
 function resetFilters() {
   filters.value = {}
   reload()
@@ -108,8 +145,8 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
-function openCreate() {
-  errorMessage.value = '巡检记录登记入口尚未接入审批流'
+function openBatch() {
+  batchStore.openPanel()
 }
 
 function runAction(action: string, row: EntryRow) {
@@ -128,10 +165,14 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    batchStore.refreshChecks()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '巡检记录列表读取失败'
   }
 }
+
+// 缆道批次落库/其他入口动作后，本页待办与统计跟着更新
+watch(() => batchStore.dataTick, reload)
 
 onMounted(reload)
 </script>

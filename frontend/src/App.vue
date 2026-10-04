@@ -5,6 +5,10 @@
       <nav class="nav-list">
         <RouterLink v-for="item in navItems" :key="item.path" :to="item.path" class="nav-item">
           {{ item.label }}
+          <span
+            v-if="item.key === 'inspection' && batchStore.checkCount > 0"
+            class="nav-badge"
+          >{{ batchStore.checkCount }}</span>
         </RouterLink>
       </nav>
     </aside>
@@ -15,13 +19,43 @@
       </header>
       <RouterView />
     </main>
+    <CablewayBatchPanel />
   </div>
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
+
+import CablewayBatchPanel from '@/components/CablewayBatchPanel.vue'
+import { useCablewayBatchStore } from '@/stores/cableway-batch'
 import { useSessionStore } from '@/stores/session'
 
 const store = useSessionStore()
+const batchStore = useCablewayBatchStore()
 
-const navItems = [{ label: "运营概览", path: "/" }, { label: "监测站点", path: "/station" }, { label: "水位监测", path: "/waterlevel" }, { label: "流量监测", path: "/discharge" }, { label: "雨量观测", path: "/rainfall" }, { label: "水质检测", path: "/waterquality" }, { label: "断面测量", path: "/crosssection" }, { label: "遥测设备", path: "/telemetry" }, { label: "数据整编", path: "/compilation" }, { label: "预警阈值", path: "/warning" }, { label: "地下水观测", path: "/groundwater" }, { label: "蒸发观测", path: "/evaporation" }, { label: "测流缆道", path: "/cableway" }, { label: "泥沙监测", path: "/sediment" }, { label: "通讯系统", path: "/communication" }, { label: "站房维护", path: "/stationhouse" }, { label: "仪器检定", path: "/calibration" }, { label: "巡检记录", path: "/inspection" }, { label: "测报方案", path: "/plan" }]
+onMounted(() => {
+  batchStore.init()
+})
+
+const navItems = [
+  { key: "dashboard", label: "运营概览", path: "/" },
+  { key: "station", label: "监测站点", path: "/station" },
+  { key: "waterlevel", label: "水位监测", path: "/waterlevel" },
+  { key: "discharge", label: "流量监测", path: "/discharge" },
+  { key: "rainfall", label: "雨量观测", path: "/rainfall" },
+  { key: "waterquality", label: "水质检测", path: "/waterquality" },
+  { key: "crosssection", label: "断面测量", path: "/crosssection" },
+  { key: "telemetry", label: "遥测设备", path: "/telemetry" },
+  { key: "compilation", label: "数据整编", path: "/compilation" },
+  { key: "warning", label: "预警阈值", path: "/warning" },
+  { key: "groundwater", label: "地下水观测", path: "/groundwater" },
+  { key: "evaporation", label: "蒸发观测", path: "/evaporation" },
+  { key: "cableway", label: "测流缆道", path: "/cableway" },
+  { key: "sediment", label: "泥沙监测", path: "/sediment" },
+  { key: "communication", label: "通讯系统", path: "/communication" },
+  { key: "stationhouse", label: "站房维护", path: "/stationhouse" },
+  { key: "calibration", label: "仪器检定", path: "/calibration" },
+  { key: "inspection", label: "巡检记录", path: "/inspection" },
+  { key: "plan", label: "测报方案", path: "/plan" },
+]
 </script>
