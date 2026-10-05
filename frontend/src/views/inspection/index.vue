@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>巡检记录管理</h2>
-        <p class="page-desc">维护巡检记录，围绕记录编号、站点编号、巡检日期、巡检人员做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护巡检记录，围绕记录编号、站点编号、巡检日期、巡检人员做登记、筛选与状态流转；巡检批次会联动核查站点缆道。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记巡检记录</button>
@@ -23,6 +23,8 @@
         {{ item.status }}：{{ item.count }}
       </span>
     </p>
+
+    <BatchPanel kind="inspection-round" />
 
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
@@ -47,7 +49,7 @@
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in availableActions(row)"
               :key="action"
               class="link"
               type="button"
@@ -64,34 +66,40 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条巡检记录记录</span>
+      <span>共 {{ total }} 条巡检记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
+import BatchPanel from '@/components/BatchPanel.vue'
 import {
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribeData } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('inspection')
 const columns = ["记录编号", "站点编号", "巡检日期", "巡检人员", "检查项目", "发现问题", "处理措施", "巡检状态"]
-const actions = ["完成巡检", "报告故障", "确认处置"]
 const statuses = ["待巡检", "已巡检", "发现故障", "已处置"]
-const stats = [{"label": "本月巡检次数", "value": 0}, {"label": "已巡检站点", "value": 0}, {"label": "待处置故障", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
+const filters = reactive<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+const stats = computed(() => [
+  { label: "本月巡检次数", value: rows.value.filter((row) => row.status !== '待巡检').length },
+  { label: "已巡检站点", value: rows.value.filter((row) => String(row.status) === '已巡检').length },
+  { label: "待处置故障", value: rows.value.filter((row) => String(row.status) === '发现故障').length },
+])
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -99,8 +107,25 @@ const statusSummary = computed(() =>
   })),
 )
 
+/** 单条动作同样受状态约束：避免和批次落库互相打架。 */
+function availableActions(row: EntryRow): string[] {
+  const status = String(row.status)
+  if (status === '待巡检') {
+    return ["完成巡检", "报告故障"]
+  }
+  if (status === '已巡检') {
+    return ["报告故障"]
+  }
+  if (status === '发现故障') {
+    return ["确认处置"]
+  }
+  return []
+}
+
 function resetFilters() {
-  filters.value = {}
+  for (const key of Object.keys(filters)) {
+    delete filters[key]
+  }
   reload()
 }
 
@@ -125,7 +150,7 @@ function runAction(action: string, row: EntryRow) {
 function reload() {
   errorMessage.value = ''
   try {
-    const payload = listEntries(meta.key, filters.value)
+    const payload = listEntries(meta.key, filters)
     rows.value = payload.items
     total.value = payload.total
   } catch (error) {
@@ -133,5 +158,11 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+onMounted(() => {
+  reload()
+  // 任意入口（缆道检修、别的标签页）落库后，待办与统计联动更新。
+  unsubscribe = subscribeData(reload)
+})
+onUnmounted(() => unsubscribe?.())
 </script>

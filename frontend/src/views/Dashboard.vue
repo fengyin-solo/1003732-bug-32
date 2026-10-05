@@ -35,9 +35,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 
 import { loadOverview } from '@/api/local-service'
+import { subscribeData } from '@/data/local-store'
 import type { OverviewResult } from '@/data/types'
 
 const cards = ref<OverviewResult['cards']>([])
@@ -49,5 +50,11 @@ function refresh() {
   moduleRows.value = payload.modules
 }
 
-onMounted(refresh)
+let unsubscribe: (() => void) | undefined
+onMounted(() => {
+  refresh()
+  // 批次落库后看板的待处理/异常量联动更新，不必手动点重新统计。
+  unsubscribe = subscribeData(refresh)
+})
+onUnmounted(() => unsubscribe?.())
 </script>

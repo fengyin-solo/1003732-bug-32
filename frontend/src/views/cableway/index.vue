@@ -24,6 +24,8 @@
       </span>
     </p>
 
+    <BatchPanel kind="cableway-overhaul" />
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -47,7 +49,7 @@
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in availableActions(row)"
               :key="action"
               class="link"
               type="button"
@@ -71,27 +73,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
+import BatchPanel from '@/components/BatchPanel.vue'
 import {
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribeData } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('cableway')
 const columns = ["缆道编号", "所属站点", "跨度米数", "建成日期", "最近检修日", "荷载能力", "检修人员", "缆道状态"]
-const actions = ["安排检修", "完成检修", "停用缆道"]
+const allActions = ["安排检修", "完成检修", "停用缆道"]
 const statuses = ["正常运行", "需检修", "检修中", "已停用"]
-const stats = [{"label": "缆道总数", "value": 0}, {"label": "正常运行数", "value": 0}, {"label": "需检修数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
+const filters = reactive<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+const stats = computed(() => [
+  { label: "缆道总数", value: rows.value.length },
+  { label: "正常运行数", value: rows.value.filter((row) => String(row.status) === '正常运行').length },
+  { label: "需检修数", value: rows.value.filter((row) => String(row.status) === '需检修').length },
+])
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -99,8 +108,30 @@ const statusSummary = computed(() =>
   })),
 )
 
+/** 已停用缆道不能再停用，也不入检修批次；状态对应的动作只显示合法的。 */
+function availableActions(row: EntryRow): string[] {
+  const status = String(row.status)
+  if (status === '已停用') {
+    return []
+  }
+  return allActions.filter((action) => {
+    if (action === '停用缆道') {
+      return true
+    }
+    if (action === '完成检修') {
+      return status === '检修中' || status === '需检修'
+    }
+    if (action === '安排检修') {
+      return status === '正常运行'
+    }
+    return true
+  })
+}
+
 function resetFilters() {
-  filters.value = {}
+  for (const key of Object.keys(filters)) {
+    delete filters[key]
+  }
   reload()
 }
 
@@ -125,7 +156,7 @@ function runAction(action: string, row: EntryRow) {
 function reload() {
   errorMessage.value = ''
   try {
-    const payload = listEntries(meta.key, filters.value)
+    const payload = listEntries(meta.key, filters)
     rows.value = payload.items
     total.value = payload.total
   } catch (error) {
@@ -133,5 +164,11 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+onMounted(() => {
+  reload()
+  // 批次落库（含别的标签页）后，列表、统计、图例一起联动更新。
+  unsubscribe = subscribeData(reload)
+})
+onUnmounted(() => unsubscribe?.())
 </script>
